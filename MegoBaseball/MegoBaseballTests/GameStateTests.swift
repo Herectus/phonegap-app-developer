@@ -1,0 +1,206 @@
+import XCTest
+@testable import MegoBaseball
+
+/// Always returns the same value, so `Double.random(in: 0..<1)` is 0 for `.low` and ~1 for `.high`.
+private struct FixedRNG: RandomNumberGenerator {
+    static let low = FixedRNG(value: 0)
+    static let high = FixedRNG(value: .max)
+    let value: UInt64
+    mutating func next() -> UInt64 { value }
+}
+
+final class GameStateTests: XCTestCase {
+    private var rng = FixedRNG.high
+
+    private func state(bases: [Bool] = [false, false, false], outs: Int = 0) -> GameState {
+        var game = GameState(innings: 9)
+        game.bases = bases
+        game.outs = outs
+        return game
+    }
+
+    func testWalkWithBasesLoadedForcesInARun() {
+        var game = state(bases: [true, true, true])
+        game.balls = 3
+        let events = game.apply(.take(strike: false), rng: &rng)
+        XCTAssertEqual(events, [.walk, .runsScored(1)])
+        XCTAssertEqual(game.bases, [true, true, true])
+        XCTAssertEqual(game.score(of: .visitor), 1)
+        XCTAssertEqual(game.balls, 0)
+    }
+
+    func testWalkOnlyMovesForcedRunners() {
+        var game = state(bases: [false, false, true])
+        game.balls = 3
+        game.apply(.take(strike: false), rng: &rng)
+        XCTAssertEqual(game.bases, [true, false, true])
+        XCTAssertEqual(game.score(of: .visitor), 0)
+    }
+
+    func testHomeRunClearsTheBases() {
+        var game = state(bases: [true, false, true])
+        let events = game.apply(.contact(.hit(.homeRun, .homeRun)), rng: &rng)
+        XCTAssertEqual(events, [.hit(.homeRun, .homeRun), .runsScored(3)])
+        XCTAssertEqual(game.bases, [false, false, false])
+        XCTAssertEqual(game.score(of: .visitor), 3)
+    }
+
+    func testDoubleAdvancesRunnersTwoBases() {
+        var game = state(bases: [true, false, false])
+        game.apply(.contact(.hit(.double, .double)), rng: &rng)
+        XCTAssertEqual(game.bases, [false, true, true])
+        XCTAssertEqual(game.score(of: .visitor), 0)
+    }
+
+    func testFoulWithTwoStrikesDoesNotStrikeOut() {
+        var game = state()
+        game.strikes = 2
+        game.apply(.contact(.foul(.foulLeft)), rng: &rng)
+        XCTAssertEqual(game.strikes, 2)
+        XCTAssertEqual(game.outs, 0)
+    }
+
+    func testThreeStrikeoutsRetireTheSide() {
+        var game = state()
+        for _ in 0..<9 { game.apply(.swingAndMiss, rng: &rng) }
+        XCTAssertEqual(game.half, .bottom)
+        XCTAssertEqual(game.inning, 1)
+        XCTAssertEqual(game.outs, 0)
+    }
+
+    func testSacrificeFlyScoresRunnerFromThird() {
+        var game = state(bases: [false, false, true])
+        let events = game.apply(.contact(.flyOut(.centerField)), rng: &rng)
+        XCTAssertEqual(events, [.out(.centerField, fly: true), .sacrificeFly, .runsScored(1)])
+        XCTAssertEqual(game.outs, 1)
+        XCTAssertEqual(game.bases, [false, false, false])
+    }
+
+    func testNoSacrificeFlyOnThirdOut() {
+        var game = state(bases: [false, false, true], outs: 2)
+        game.apply(.contact(.flyOut(.leftField)), rng: &rng)
+        XCTAssertEqual(game.score(of: .visitor), 0)
+        XCTAssertEqual(game.half, .bottom)
+    }
+
+    func testGroundBallDoublePlay() {
+        var game = state(bases: [true, false, false])
+        var low = FixedRNG.low
+        let events = game.apply(.contact(.groundOut(.shortstop)), rng: &low)
+        XCTAssertEqual(events, [.doublePlay(.shortstop)])
+        XCTAssertEqual(game.outs, 2)
+        XCTAssertEqual(game.bases, [false, false, false])
+    }
+
+    func testGroundOutWithoutDoublePlayMovesRunnersUp() {
+        var game = state(bases: [true, false, true])
+        let events = game.apply(.contact(.groundOut(.secondBase)), rng: &rng)
+        XCTAssertEqual(events, [.out(.secondBase, fly: false), .runsScored(1)])
+        XCTAssertEqual(game.bases, [false, true, false])
+        XCTAssertEqual(game.outs, 1)
+    }
+
+    func testWalkOffHomeRunEndsTheGame() {
+        var game = state()
+        game.inning = 9
+        game.half = .bottom
+        game.score = [2, 2]
+        let events = game.apply(.contact(.hit(.homeRun, .homeRun)), rng: &rng)
+        XCTAssertEqual(events.last, .gameOver(winner: .home))
+        XCTAssertEqual(game.winner, .home)
+    }
+
+    func testHomeTeamLeadingAfterTopOfNinthWins() {
+        var game = state(outs: 2)
+        game.inning = 9
+        game.score = [1, 3]
+        game.strikes = 2
+        let events = game.apply(.swingAndMiss, rng: &rng)
+        XCTAssertEqual(events, [.strikeout, .sideRetired, .gameOver(winner: .home)])
+    }
+
+    func testTieAfterNineGoesToExtraInnings() {
+        var game = state(outs: 2)
+        game.inning = 9
+        game.half = .bottom
+        game.score = [4, 4]
+        game.strikes = 2
+        game.apply(.swingAndMiss, rng: &rng)
+        XCTAssertNil(game.winner)
+        XCTAssertEqual(game.inning, 10)
+        XCTAssertEqual(game.half, .top)
+    }
+
+    func testVisitorWinsWhenHomeTrailsAfterBottomOfNinth() {
+        var game = state(outs: 2)
+        game.inning = 9
+        game.half = .bottom
+        game.score = [5, 2]
+        game.strikes = 2
+        game.apply(.swingAndMiss, rng: &rng)
+        XCTAssertEqual(game.winner, .visitor)
+    }
+
+    func testStealPrefersSecondOverHome() {
+        let game = state(bases: [true, false, true])
+        XCTAssertEqual(game.stealingRunnerBase, 0)
+    }
+
+    func testSuccessfulStealMovesRunner() {
+        var game = state(bases: [true, false, false])
+        XCTAssertEqual(game.resolveSteal(success: true), [.stolenBase(to: 1)])
+        XCTAssertEqual(game.bases, [false, true, false])
+    }
+
+    func testStealOfHomeScores() {
+        var game = state(bases: [false, false, true])
+        XCTAssertEqual(game.resolveSteal(success: true), [.stolenBase(to: 3), .runsScored(1)])
+        XCTAssertEqual(game.score(of: .visitor), 1)
+    }
+
+    func testCaughtStealingCanEndTheInning() {
+        var game = state(bases: [true, false, false], outs: 2)
+        XCTAssertEqual(game.resolveSteal(success: false), [.caughtStealing, .sideRetired])
+        XCTAssertEqual(game.half, .bottom)
+    }
+}
+
+final class RulesTests: XCTestCase {
+    func testSwingTimingWindows() {
+        XCTAssertEqual(SwingTiming.classify(delta: 0.0), .perfect)
+        XCTAssertEqual(SwingTiming.classify(delta: -0.03), .perfect)
+        XCTAssertEqual(SwingTiming.classify(delta: 0.06), .good)
+        XCTAssertEqual(SwingTiming.classify(delta: -0.1), .fair(early: true))
+        XCTAssertEqual(SwingTiming.classify(delta: 0.1), .fair(early: false))
+        XCTAssertEqual(SwingTiming.classify(delta: 0.2), .miss)
+        XCTAssertEqual(SwingTiming.classify(delta: -0.5), .miss)
+    }
+
+    func testBadTimingIsASwingAndMiss() {
+        var rng = SystemRandomNumberGenerator()
+        XCTAssertEqual(Rules.outcome(swingDelta: 0.3, pitch: .fastball, rng: &rng), .swingAndMiss)
+    }
+
+    func testPerfectTimingAlwaysPutsTheBallInPlay() {
+        var rng = SystemRandomNumberGenerator()
+        for _ in 0..<500 {
+            let outcome = Rules.outcome(swingDelta: 0.01, pitch: .curve, rng: &rng)
+            guard case .contact(let ball) = outcome else { return XCTFail("expected contact, got \(outcome)") }
+            if case .foul = ball { XCTFail("perfect swing should never foul") }
+            if case .groundOut = ball { XCTFail("perfect swing should never ground out") }
+        }
+    }
+
+    func testTakenPitchIsBallOrStrike() {
+        var low = FixedRNG.low
+        XCTAssertEqual(Rules.outcome(swingDelta: nil, pitch: .fastball, rng: &low), .take(strike: true))
+        var high = FixedRNG.high
+        XCTAssertEqual(Rules.outcome(swingDelta: nil, pitch: .fastball, rng: &high), .take(strike: false))
+    }
+
+    func testEveryPitchReachesThePlate() {
+        for pitch in PitchType.allCases {
+            XCTAssertEqual(pitch.baseIntervals.count, PitchType.trackLength)
+        }
+    }
+}
