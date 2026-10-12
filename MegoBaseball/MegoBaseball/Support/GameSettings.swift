@@ -7,6 +7,8 @@ final class GameSettings: ObservableObject {
         case auto = "AUTO"
         /// Two players pass the phone: one pitches while the other bats.
         case manual = "MANUAL"
+        /// Two players, each on their own iPhone, connected over Wi-Fi/Bluetooth.
+        case nearby = "NEARBY"
 
         var id: String { rawValue }
     }

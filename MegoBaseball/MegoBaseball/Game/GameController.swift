@@ -25,10 +25,24 @@ final class GameController: ObservableObject {
     @Published private(set) var battedBallPosition: CGPoint?
     @Published private(set) var message = ""
     @Published private(set) var stealAttempted = false
-    /// Teams controlled by people for the current game.
+    /// Teams controlled by people on this phone for the current game.
     @Published private(set) var humanTeams: Set<Team> = [.visitor]
+    /// Shown on the power-off screen, e.g. after a nearby connection drops.
+    @Published private(set) var notice: String?
 
     let settings: GameSettings
+    let nearby = NearbyService()
+
+    /// Whether this phone is in a nearby game, and on which side of the link.
+    private enum Link {
+        case none, host, guest
+    }
+
+    private var link: Link = .none
+    /// The team the other phone controls in a nearby game.
+    private var remoteTeam: Team?
+    /// A pitch the guest chose while the host was still showing the last play.
+    private var pendingPitch: PitchType?
     private var engine = GameState()
     private let sound = SoundEngine()
     private let haptics = Haptics()
@@ -43,6 +57,9 @@ final class GameController: ObservableObject {
 
     init(settings: GameSettings) {
         self.settings = settings
+        nearby.onConnected = { [weak self] in self?.nearbyConnected() }
+        nearby.onDisconnected = { [weak self] in self?.nearbyDisconnected() }
+        nearby.onMessage = { [weak self] message in self?.handle(message) }
     }
 
     // MARK: - Who controls what
@@ -50,6 +67,19 @@ final class GameController: ObservableObject {
     var isHumanBatting: Bool { humanTeams.contains(board.battingTeam) }
     var isHumanPitching: Bool { humanTeams.contains(board.fieldingTeam) }
     var isTwoPlayer: Bool { humanTeams.count == 2 }
+    var isNearbyGame: Bool { link != .none }
+    var isNearbyGuest: Bool { link == .guest }
+
+    private func isCPU(_ team: Team) -> Bool { !humanTeams.contains(team) && team != remoteTeam }
+    private var isCPUBatting: Bool { isCPU(board.battingTeam) }
+    private var isCPUPitching: Bool { isCPU(board.fieldingTeam) }
+    /// The phone whose batter is up times the swing; in local games that's always this phone.
+    private var judgesPitch: Bool { link == .none || isHumanBatting }
+
+    var modeLabel: String {
+        if isNearbyGame { return "NEARBY · 2 PHONES" }
+        return isTwoPlayer ? "MANUAL · 2 PLAYER" : "AUTO · VS CPU"
+    }
 
     var canPitch: Bool { phase == .ready && isHumanPitching }
     var canSwing: Bool { (phase == .windup || phase == .pitching) && isHumanBatting && !hasSwung }
@@ -63,14 +93,30 @@ final class GameController: ObservableObject {
 
     func label(for team: Team) -> String {
         if isTwoPlayer { return team == .visitor ? "P1" : "P2" }
-        return humanTeams.contains(team) ? "YOU" : "CPU"
+        if humanTeams.contains(team) { return "YOU" }
+        return team == remoteTeam ? "RIVAL" : "CPU"
+    }
+
+    private func winMessage(for winner: Team) -> String {
+        let high = max(engine.score[0], engine.score[1])
+        let low = min(engine.score[0], engine.score[1])
+        let who = label(for: winner)
+        return "GAME OVER · \(who) \(who == "YOU" ? "WIN" : "WINS") \(high)-\(low)"
     }
 
     // MARK: - Power and game flow
 
-    func powerOn() { newGame() }
+    func powerOn() {
+        notice = nil
+        newGame()
+    }
 
     func powerOff() {
+        if link != .none {
+            link = .none
+            remoteTeam = nil
+            nearby.stop()
+        }
         cancelTasks()
         phase = .off
         ballIndex = nil
@@ -80,9 +126,25 @@ final class GameController: ObservableObject {
     }
 
     func newGame() {
+        switch link {
+        case .guest:
+            nearby.send(.newGameRequest)
+        case .host:
+            nearby.send(.start(innings: settings.innings))
+            startGame(innings: settings.innings, humans: [.visitor], remote: .home)
+        case .none:
+            let humans: Set<Team> = settings.mode == .manual ? [.visitor, .home] : [.visitor]
+            startGame(innings: settings.innings, humans: humans, remote: nil)
+        }
+    }
+
+    private func startGame(innings: Int, humans: Set<Team>, remote: Team?) {
         cancelTasks()
-        humanTeams = settings.mode == .manual ? [.visitor, .home] : [.visitor]
-        engine = GameState(innings: settings.innings)
+        humanTeams = humans
+        remoteTeam = remote
+        pendingPitch = nil
+        notice = nil
+        engine = GameState(innings: innings)
         board = engine
         ballIndex = nil
         litSpot = nil
@@ -116,12 +178,17 @@ final class GameController: ObservableObject {
             message = "YOU'RE UP · GET READY"
         }
 
-        if !isHumanPitching {
+        if isCPUPitching {
             run { controller in
                 try await controller.pause(Double.random(in: 1.0...2.0))
                 guard controller.phase == .ready else { return }
                 controller.throwPitch(controller.cpuPitchChoice())
             }
+        }
+
+        if link == .host, let pitch = pendingPitch {
+            pendingPitch = nil
+            if board.fieldingTeam == remoteTeam { throwPitch(pitch) }
         }
     }
 
@@ -130,7 +197,14 @@ final class GameController: ObservableObject {
     func pitch(_ type: PitchType) {
         guard canPitch else { return }
         haptic(.tap)
-        throwPitch(type)
+        if link == .guest {
+            // The host rolls the pitch speed and tells both phones to throw it.
+            phase = .windup
+            message = type.label
+            nearby.send(.pitchRequest(type))
+        } else {
+            throwPitch(type)
+        }
     }
 
     func swing() {
@@ -142,14 +216,25 @@ final class GameController: ObservableObject {
         guard canSteal else { return }
         haptic(.tap)
         attemptSteal()
+        if link != .none { nearby.send(.stealStarted(serial: pitchSerial)) }
     }
 
     // MARK: - The pitch
 
+    /// Picks this pitch's speed and throws it, telling the other phone in a nearby game.
     private func throwPitch(_ type: PitchType) {
+        // A little speed variation so no two pitches can be timed from memory.
+        let speed = Double.random(in: 0.92...1.08)
+        let intervals = type.baseIntervals.map { $0 * speed }
+        let serial = pitchSerial + 1
+        if link == .host { nearby.send(.pitch(type, intervals: intervals, serial: serial)) }
+        beginPitch(type, intervals: intervals, serial: serial)
+    }
+
+    private func beginPitch(_ type: PitchType, intervals: [Double], serial: Int) {
         phase = .windup
         currentPitch = type
-        pitchSerial += 1
+        pitchSerial = serial
         hasSwung = false
         stealAttempted = false
         litSpot = nil
@@ -157,11 +242,6 @@ final class GameController: ObservableObject {
         message = isHumanPitching && !isHumanBatting ? type.label : "HERE'S THE PITCH"
         play(.windup)
 
-        // A little speed variation so no two pitches can be timed from memory.
-        let speed = Double.random(in: 0.92...1.08)
-        let intervals = type.baseIntervals.map { $0 * speed }
-
-        let serial = pitchSerial
         run { controller in
             try await controller.pause(0.35)
             guard controller.pitchSerial == serial else { return }
@@ -177,7 +257,7 @@ final class GameController: ObservableObject {
         ballIndex = 0
         play(.tick)
 
-        if !isHumanBatting { scheduleCPUBatter(for: type) }
+        if isCPUBatting { scheduleCPUBatter(for: type) }
 
         let arrival = arrivalTime
         let serial = pitchSerial
@@ -190,16 +270,29 @@ final class GameController: ObservableObject {
                 controller.ballIndex = index
                 controller.play(.tick)
             }
+            // Only the batter's phone calls a taken pitch; the other phone waits to hear about it.
+            guard controller.judgesPitch else { return }
             try await controller.pause(until: arrival + SwingTiming.missWindow)
             guard controller.phase == .pitching, controller.pitchSerial == serial else { return }
-            controller.resolvePitch(swingDelta: nil)
+            controller.settle(swingDelta: nil)
         }
     }
 
     private func performSwing() {
-        guard phase == .pitching, !hasSwung else { return }
+        guard phase == .pitching, !hasSwung, judgesPitch else { return }
         hasSwung = true
-        resolvePitch(swingDelta: now() - arrivalTime)
+        settle(swingDelta: now() - arrivalTime)
+    }
+
+    /// The batter's phone has decided the swing. The guest reports it; the host or a local game resolves it.
+    private func settle(swingDelta: Double?) {
+        if link == .guest {
+            phase = .result
+            ballIndex = nil
+            nearby.send(.batterReport(serial: pitchSerial, swingDelta: swingDelta, steal: stealAttempted))
+        } else {
+            resolvePitch(swingDelta: swingDelta)
+        }
     }
 
     private func attemptSteal() {
@@ -235,6 +328,10 @@ final class GameController: ObservableObject {
 
         let swung = swingDelta != nil
         let playEvents = events
+        if link == .host {
+            nearby.send(.result(serial: pitchSerial, events: playEvents, basesBefore: basesBefore,
+                                swung: swung, state: engine))
+        }
         run { controller in
             try await controller.animate(playEvents, swung: swung, basesBefore: basesBefore)
         }
@@ -401,9 +498,7 @@ final class GameController: ObservableObject {
 
         if let winner = engine.winner {
             phase = .gameOver
-            let high = max(engine.score[0], engine.score[1])
-            let low = min(engine.score[0], engine.score[1])
-            message = "GAME OVER · \(label(for: winner)) WIN \(high)-\(low)"
+            message = winMessage(for: winner)
             play(.gameOver)
             haptic(.success)
         } else {
@@ -455,6 +550,93 @@ final class GameController: ObservableObject {
                 play(.tick)
             }
             try await pause(0.22)
+        }
+    }
+
+    // MARK: - Nearby play
+
+    func hostNearbyGame() {
+        notice = nil
+        nearby.host()
+    }
+
+    func joinNearbyGame() {
+        notice = nil
+        nearby.browse()
+    }
+
+    func cancelNearby() {
+        nearby.stop()
+    }
+
+    private func nearbyConnected() {
+        guard let role = nearby.role else { return }
+        link = role == .host ? .host : .guest
+        if link == .host {
+            // The host plays the visitors and starts things off; the guest waits for `.start`.
+            // A short pause gives the guest's side of the connection time to settle.
+            run { controller in
+                try await controller.pause(0.5)
+                controller.newGame()
+            }
+        } else {
+            humanTeams = [.home]
+            remoteTeam = .visitor
+            message = "CONNECTED · WAITING FOR HOST"
+        }
+    }
+
+    private func nearbyDisconnected() {
+        guard link != .none else { return }
+        link = .none
+        powerOff()
+        notice = "CONNECTION LOST"
+    }
+
+    private func handle(_ message: NetMessage) {
+        switch (link, message) {
+        case (.guest, .start(let innings)):
+            startGame(innings: innings, humans: [.home], remote: .visitor)
+
+        case (.host, .newGameRequest):
+            if phase == .gameOver { newGame() }
+
+        case (.host, .pitchRequest(let type)):
+            guard board.fieldingTeam == remoteTeam else { return }
+            if phase == .ready { throwPitch(type) } else { pendingPitch = type }
+
+        case (.guest, .pitch(let type, let intervals, let serial)):
+            if phase == .result {
+                // Still finishing the last play's animation; jump to the end of it.
+                cancelTasks()
+                board = engine
+                litSpot = nil
+                battedBallPosition = nil
+            }
+            beginPitch(type, intervals: intervals, serial: serial)
+
+        case (_, .stealStarted(let serial)):
+            guard serial == pitchSerial, phase == .windup || phase == .pitching, !stealAttempted else { return }
+            attemptSteal()
+
+        case (.host, .batterReport(let serial, let swingDelta, let steal)):
+            guard serial == pitchSerial, phase == .windup || phase == .pitching,
+                  board.battingTeam == remoteTeam else { return }
+            phase = .pitching
+            stealAttempted = steal
+            resolvePitch(swingDelta: swingDelta)
+
+        case (.guest, .result(let serial, let events, let basesBefore, let swung, let state)):
+            guard serial == pitchSerial else { return }
+            phase = .result
+            ballIndex = nil
+            engine = state
+            run { controller in
+                try await controller.animate(events, swung: swung, basesBefore: basesBefore)
+            }
+
+        default:
+            break
         }
     }
 

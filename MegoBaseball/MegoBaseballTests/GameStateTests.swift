@@ -204,3 +204,28 @@ final class RulesTests: XCTestCase {
         }
     }
 }
+
+final class NetMessageTests: XCTestCase {
+    func testMessagesSurviveTheTripBetweenPhones() throws {
+        var state = GameState(innings: 6)
+        state.bases = [true, false, true]
+        state.score = [3, 1]
+        state.half = .bottom
+        let messages: [NetMessage] = [
+            .start(innings: 9),
+            .newGameRequest,
+            .pitchRequest(.curve),
+            .pitch(.fastball, intervals: [0.06, 0.07], serial: 4),
+            .stealStarted(serial: 4),
+            .batterReport(serial: 4, swingDelta: nil, steal: true),
+            .batterReport(serial: 5, swingDelta: -0.02, steal: false),
+            .result(serial: 5,
+                     events: [.hit(.double, .double), .runsScored(1), .out(.leftField, fly: true),
+                              .stolenBase(to: 2), .gameOver(winner: .home)],
+                     basesBefore: [true, false, false], swung: true, state: state),
+        ]
+        for message in messages {
+            XCTAssertEqual(try NetMessage.decode(message.encoded()), message)
+        }
+    }
+}

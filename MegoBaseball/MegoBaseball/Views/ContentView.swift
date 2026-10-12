@@ -19,7 +19,8 @@ struct ContentView: View {
                         .aspectRatio(1, contentMode: .fit)
                         .frame(maxHeight: .infinity)
                     if game.phase == .gameOver {
-                        RetroButton(title: "NEW GAME", height: 64) { game.newGame() }
+                        RetroButton(title: game.isNearbyGuest ? "ASK HOST FOR NEW GAME" : "NEW GAME",
+                                    height: 64) { game.newGame() }
                     } else {
                         ControlPanel()
                     }
@@ -49,7 +50,7 @@ struct ContentView: View {
             .accessibilityLabel("Game menu")
 
             Spacer()
-            Text(game.isTwoPlayer ? "MANUAL · 2 PLAYER" : "AUTO · VS CPU")
+            Text(game.modeLabel)
                 .font(.system(size: 12, weight: .bold, design: .rounded))
                 .foregroundColor(.white.opacity(0.7))
             Spacer()
@@ -88,10 +89,12 @@ struct PowerOffView: View {
 
                 optionGroup("GAME") {
                     Picker("Game", selection: $settings.mode) {
-                        Text("AUTO · VS CPU").tag(GameSettings.Mode.auto)
-                        Text("MANUAL · 2 PLAYER").tag(GameSettings.Mode.manual)
+                        Text("VS CPU").tag(GameSettings.Mode.auto)
+                        Text("2P · 1 PHONE").tag(GameSettings.Mode.manual)
+                        Text("2P · 2 PHONES").tag(GameSettings.Mode.nearby)
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: settings.mode) { game.cancelNearby() }
                 }
 
                 optionGroup("INNINGS") {
@@ -117,7 +120,17 @@ struct PowerOffView: View {
                 .tint(Theme.buttonOrange)
                 .foregroundColor(.white)
 
-                RetroButton(title: "POWER ON", height: 64) { game.powerOn() }
+                if let notice = game.notice {
+                    Text(notice)
+                        .font(Theme.ledFont(16))
+                        .foregroundColor(Theme.ledOn)
+                }
+
+                if settings.mode == .nearby {
+                    NearbyLobbyView(nearby: game.nearby)
+                } else {
+                    RetroButton(title: "POWER ON", height: 64) { game.powerOn() }
+                }
 
                 howToPlay
             }
@@ -147,7 +160,9 @@ struct PowerOffView: View {
                 Text("• Tap SWING as the ball reaches the plate. The closer your timing, the harder the hit. Swing early to pull it left, late to go the other way.")
                 Text("• Don't swing and the umpire calls a ball or strike. 4 balls walks, 3 strikes is an out.")
                 Text("• With a runner on, tap STEAL during the pitch. Steals work best on slow pitches.")
-                Text("• AUTO: you bat in the top half and pitch in the bottom against the computer. MANUAL: two players share the phone.")
+                Text("• VS CPU: you bat in the top half and pitch in the bottom against the computer.")
+                Text("• 2P · 1 PHONE: two players share this phone.")
+                Text("• 2P · 2 PHONES: each player uses their own iPhone in the same room. One taps HOST GAME, the other taps JOIN GAME. The host bats first.")
             }
             .font(.system(size: 14, design: .rounded))
             .foregroundColor(.white.opacity(0.85))

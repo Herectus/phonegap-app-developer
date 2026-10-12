@@ -248,6 +248,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "MegoBaseball-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Baseball 2";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports-games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -277,6 +278,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "MegoBaseball-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Baseball 2";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports-games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

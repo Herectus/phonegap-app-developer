@@ -1,7 +1,7 @@
 import Foundation
 
 /// The two sides of the game. Visitors bat in the top half of each inning.
-enum Team: Int, CaseIterable {
+enum Team: Int, CaseIterable, Codable {
     case visitor = 0
     case home = 1
 
@@ -9,13 +9,13 @@ enum Team: Int, CaseIterable {
     var opponent: Team { self == .visitor ? .home : .visitor }
 }
 
-enum Half: Equatable {
+enum Half: Equatable, Codable {
     case top
     case bottom
 }
 
 /// The three pitches the pitcher's buttons can throw.
-enum PitchType: String, CaseIterable, Identifiable {
+enum PitchType: String, CaseIterable, Identifiable, Codable {
     case fastball
     case changeUp
     case curve
@@ -67,7 +67,7 @@ enum PitchType: String, CaseIterable, Identifiable {
 }
 
 /// Every LED hole on the field that can light up when the ball is put in play.
-enum FieldSpot: String, CaseIterable, Identifiable {
+enum FieldSpot: String, CaseIterable, Identifiable, Codable {
     case homeRun
     case singleLeft
     case singleRight
@@ -108,7 +108,7 @@ enum FieldSpot: String, CaseIterable, Identifiable {
     static let infielders: [FieldSpot] = [.shortstop, .secondBase, .thirdBase, .firstBase, .pitcher]
 }
 
-enum HitKind: Int, Equatable {
+enum HitKind: Int, Equatable, Codable {
     case single = 1
     case double = 2
     case triple = 3
@@ -164,7 +164,7 @@ enum SwingTiming: Equatable {
 }
 
 /// Things the game announces after a pitch, in the order they happened.
-enum PlayEvent: Equatable {
+enum PlayEvent: Equatable, Codable {
     case ball
     case calledStrike
     case swingingStrike

@@ -26,7 +26,7 @@ The project uses Xcode 16 folder-synced groups, so any `.swift` file you add und
 | **FAST / CHANGE / CURVE** | Pitcher throws. Fastballs are quick, change-ups are slow, curves hang then break late. |
 | **SWING** | Fires the moment you touch it. Time it to the ball reaching the plate. |
 | **STEAL** | During a pitch, the lead runner takes off. Works best on slow pitches. |
-| ⏻ (top left) | New game or power off. |
+| ⏻ (top left) | New game or power off. In a nearby game, power off disconnects both phones. |
 
 * **Timing:** within ±35 ms is a *perfect* swing (home runs, extra bases), ±80 ms is
   *good*, ±140 ms gets a piece of it (fouls, grounders). Early swings pull the ball to
@@ -44,11 +44,33 @@ The project uses Xcode 16 folder-synced groups, so any `.swift` file you add und
 * **AUTO, vs. CPU:** you are the visitor. You bat in the top half while the computer
   pitches, and you pitch in the bottom half while the computer bats. Choose a
   **ROOKIE** or **PRO** computer batter.
-* **MANUAL, 2 players:** pass-and-play. P1 is the visitor and P2 is home; whoever is in
+* **2P · 1 PHONE (manual):** pass-and-play. P1 is the visitor and P2 is home; whoever is in
   the field uses the pitch buttons and whoever is up uses SWING and STEAL.
+* **2P · 2 PHONES (nearby):** each player on their own iPhone in the same room, connected
+  directly over Wi-Fi or Bluetooth with Apple's Multipeer Connectivity. No internet,
+  account or server is needed. See below.
 
 Sound follows the ring/silent switch and can be muted from the top bar. Haptics can
 be turned off on the power-off screen.
+
+## Playing on two iPhones
+
+1. Install the app on both iPhones (build to each one from Xcode).
+2. On both phones choose **2P · 2 PHONES**. Turn on Wi-Fi or Bluetooth on both.
+3. Phone 1 taps **HOST GAME**. Phone 2 taps **JOIN GAME**, then taps phone 1's name.
+4. The first time, iOS asks to allow **Local Network** access. Tap **Allow** on both phones.
+5. The game starts on both phones. The host is the visitor and bats first, and the host's
+   innings setting is used.
+
+Each phone shows the same field and scoreboard. Only the pitcher's phone has working pitch
+buttons and only the batter's phone has SWING and STEAL. The batter sees "HERE'S THE PITCH",
+not which pitch was thrown.
+
+How it stays fair: the host phone keeps the official score and makes the random rolls.
+When a pitch is thrown, both phones animate it, and the **batter's own phone** times the
+swing against its own animation, then sends the result. Network delay therefore never
+makes a swing early or late. If the connection drops (for example, one phone leaves the
+app or goes out of range) both phones show **CONNECTION LOST** and return to the menu.
 
 ## Code layout
 
@@ -59,7 +81,8 @@ MegoBaseball/
     GameModels.swift           Pitches, field spots, outcomes, swing timing windows
     Rules.swift                Swing timing → batted-ball outcome tables
     GameState.swift            Count, outs, bases, score, innings, steals, game end
-  Game/GameController.swift    Real-time loop: pitch flight, CPU opponent, animations
+  Game/GameController.swift    Real-time loop: pitch flight, CPU opponent, animations, nearby play
+  Network/                     Multipeer Connectivity service and the messages the phones exchange
   Support/                     Field geometry, square-wave sound, haptics, settings
   Views/                       Field, scoreboard (7-segment digits), buttons, menu
 MegoBaseballTests/             XCTest suite for the engine

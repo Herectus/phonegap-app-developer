@@ -2,7 +2,7 @@ import Foundation
 
 /// The complete score, count and base situation of a game, plus the rules that change it.
 /// Pure value type with no timing or UI so it can be unit tested.
-struct GameState: Equatable {
+struct GameState: Equatable, Codable {
     let regulationInnings: Int
     var inning = 1
     var half: Half = .top
