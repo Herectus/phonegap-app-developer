@@ -2,7 +2,11 @@ import AVFoundation
 
 /// Square-wave bleeps in the spirit of a 1970s handheld's piezo speaker.
 /// Every effect is synthesized once at launch; nothing is loaded from disk.
-final class SoundEngine {
+///
+/// Audio session and engine calls can block, so they all run on a private serial queue,
+/// never the main thread. `buffers` is filled in `init` and only read afterwards, which
+/// is why the class can be shared across threads.
+final class SoundEngine: @unchecked Sendable {
     enum Effect: CaseIterable {
         case tick, windup, ball, strike, swingMiss, foul
         case single, extraBase, homeRun, out, run, walk
@@ -16,6 +20,7 @@ final class SoundEngine {
     private let tickPlayer = AVAudioPlayerNode()
     private let format: AVAudioFormat
     private var buffers: [Effect: AVAudioPCMBuffer] = [:]
+    private let queue = DispatchQueue(label: "SoundEngine", qos: .userInteractive)
 
     init() {
         format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
@@ -29,20 +34,24 @@ final class SoundEngine {
             buffers[effect] = render(notes(for: effect))
         }
 
-        // Ambient: respects the silent switch and mixes with the player's music.
-        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
-        try? AVAudioSession.sharedInstance().setActive(true)
-        try? engine.start()
+        queue.async { [self] in
+            // Ambient: respects the silent switch and mixes with the player's music.
+            try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
+            try? AVAudioSession.sharedInstance().setActive(true)
+            try? engine.start()
+        }
     }
 
     func play(_ effect: Effect) {
         guard let buffer = buffers[effect] else { return }
-        if !engine.isRunning { try? engine.start() }
-        guard engine.isRunning else { return }
         // Ticks get their own player so the pitch track never cuts off a result jingle.
         let player = effect == .tick ? tickPlayer : effectsPlayer
-        player.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
-        if !player.isPlaying { player.play() }
+        queue.async { [self] in
+            if !engine.isRunning { try? engine.start() }
+            guard engine.isRunning else { return }
+            player.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
+            if !player.isPlaying { player.play() }
+        }
     }
 
     private func notes(for effect: Effect) -> [Note] {
