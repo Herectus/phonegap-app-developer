@@ -32,10 +32,12 @@ final class NearbyService: NSObject, ObservableObject {
     var onDisconnected: (@MainActor () -> Void)?
     var onMessage: (@MainActor (NetMessage) -> Void)?
 
-    private let myPeer: MCPeerID
-    private let session: MCSession
+    private var myPeer: MCPeerID
+    private var session: MCSession
     private var advertiser: MCNearbyServiceAdvertiser?
     private var browser: MCNearbyServiceBrowser?
+    /// Bumped by `stop()` so a delayed `stop(after:)` can't cut off a newer connection.
+    private var generation = 0
 
     override init() {
         myPeer = MCPeerID(displayName: UIDevice.current.name)
@@ -44,13 +46,24 @@ final class NearbyService: NSObject, ObservableObject {
         session.delegate = self
     }
 
+    /// Starts a fresh session advertised under the player's chosen name.
+    private func prepare(name: String) {
+        stop()
+        if myPeer.displayName != name {
+            session.delegate = nil
+            myPeer = MCPeerID(displayName: name)
+            session = MCSession(peer: myPeer, securityIdentity: nil, encryptionPreference: .required)
+            session.delegate = self
+        }
+    }
+
     var isConnected: Bool {
         if case .connected = status { return true }
         return false
     }
 
-    func host() {
-        stop()
+    func host(name: String) {
+        prepare(name: name)
         role = .host
         let advertiser = MCNearbyServiceAdvertiser(peer: myPeer, discoveryInfo: nil, serviceType: Self.serviceType)
         advertiser.delegate = self
@@ -59,8 +72,8 @@ final class NearbyService: NSObject, ObservableObject {
         status = .hosting
     }
 
-    func browse() {
-        stop()
+    func browse(name: String) {
+        prepare(name: name)
         role = .guest
         foundHosts = []
         let browser = MCNearbyServiceBrowser(peer: myPeer, serviceType: Self.serviceType)
@@ -76,8 +89,19 @@ final class NearbyService: NSObject, ObservableObject {
         browser.invitePeer(host, to: session, withContext: nil, timeout: 20)
     }
 
+    /// Disconnects after a short delay, so a last message (like a forfeit) can go out first.
+    func stop(after seconds: Double) {
+        let expected = generation
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard let self, self.generation == expected else { return }
+            self.stop()
+        }
+    }
+
     /// Stops looking, drops any connection and returns to idle.
     func stop() {
+        generation += 1
         advertiser?.stopAdvertisingPeer()
         advertiser = nil
         browser?.stopBrowsingForPeers()

@@ -6,10 +6,15 @@ struct NearbyLobbyView: View {
     @EnvironmentObject private var game: GameController
     @ObservedObject var nearby: NearbyService
 
+    init(nearby: NearbyService) {
+        self.nearby = nearby
+    }
+
     var body: some View {
         VStack(spacing: 14) {
             switch nearby.status {
             case .idle:
+                NameField()
                 HStack(spacing: 10) {
                     RetroButton(title: "HOST GAME", height: 64) { game.hostNearbyGame() }
                     RetroButton(title: "JOIN GAME", height: 64) { game.joinNearbyGame() }
@@ -65,5 +70,88 @@ struct NearbyLobbyView: View {
             .foregroundColor(.white.opacity(0.7))
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The name the other phone sees and keeps your record under.
+private struct NameField: View {
+    @EnvironmentObject private var settings: GameSettings
+
+    var body: some View {
+        HStack {
+            Text("YOUR NAME")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
+            TextField("Name", text: $settings.playerName)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .font(Theme.ledFont(16))
+                .foregroundColor(Theme.ledOn)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.black))
+                .onChange(of: settings.playerName) {
+                    if settings.playerName.count > GameSettings.maxNameLength {
+                        settings.playerName = String(settings.playerName.prefix(GameSettings.maxNameLength))
+                    }
+                }
+        }
+    }
+}
+
+/// Wins and losses against everyone this phone has played nearby.
+struct RecordsView: View {
+    @ObservedObject var records: RecordBook
+    @State private var confirmingClear = false
+
+    init(records: RecordBook) {
+        self.records = records
+    }
+
+    var body: some View {
+        let all = records.table.all
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("HEAD-TO-HEAD RECORDS")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                Spacer()
+                if !all.isEmpty {
+                    Button("Clear") { confirmingClear = true }
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(Theme.buttonOrange)
+                }
+            }
+
+            if all.isEmpty {
+                Text("No 2-phone games yet.")
+                    .font(.system(size: 13, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+
+            ForEach(all) { entry in
+                HStack {
+                    Text(entry.name)
+                        .foregroundColor(.white)
+                    Spacer()
+                    if entry.forfeitWins + entry.forfeitLosses > 0 {
+                        Text("FF \(entry.forfeitWins)-\(entry.forfeitLosses)")
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    Text("W \(entry.wins)  L \(entry.losses)")
+                        .foregroundColor(Theme.ledOn)
+                }
+                .font(Theme.ledFont(14))
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.5)))
+        .confirmationDialog("Erase every head-to-head record on this phone?",
+                            isPresented: $confirmingClear, titleVisibility: .visible) {
+            Button("Erase Records", role: .destructive) { records.clear() }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }

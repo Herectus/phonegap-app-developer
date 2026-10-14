@@ -212,6 +212,8 @@ final class NetMessageTests: XCTestCase {
         state.score = [3, 1]
         state.half = .bottom
         let messages: [NetMessage] = [
+            .hello(playerID: "ABC-123", name: "SAM"),
+            .forfeit,
             .start(innings: 9),
             .newGameRequest,
             .pitchRequest(.curve),
@@ -227,5 +229,53 @@ final class NetMessageTests: XCTestCase {
         for message in messages {
             XCTAssertEqual(try NetMessage.decode(message.encoded()), message)
         }
+    }
+}
+
+final class RecordTableTests: XCTestCase {
+    private let sam = Opponent(id: "sam-id", name: "SAM")
+    private let alex = Opponent(id: "alex-id", name: "ALEX")
+
+    func testWinsAndLossesAreKeptPerOpponent() {
+        var table = RecordTable()
+        table.record(won: true, against: sam)
+        table.record(won: false, against: sam)
+        table.record(won: true, against: sam)
+        table.record(won: false, against: alex)
+        XCTAssertEqual(table.record(against: sam)?.summary, "2-1")
+        XCTAssertEqual(table.record(against: alex)?.summary, "0-1")
+    }
+
+    func testForfeitsCountAsWinsAndLossesAndAreTalliedSeparately() {
+        var table = RecordTable()
+        table.record(won: true, forfeit: true, against: sam)
+        table.record(won: false, forfeit: true, against: sam)
+        let entry = table.record(against: sam)
+        XCTAssertEqual(entry?.summary, "1-1")
+        XCTAssertEqual(entry?.forfeitWins, 1)
+        XCTAssertEqual(entry?.forfeitLosses, 1)
+    }
+
+    func testRenamedOpponentKeepsTheirRecord() {
+        var table = RecordTable()
+        table.record(won: true, against: sam)
+        table.record(won: true, against: Opponent(id: "sam-id", name: "SAMMY"))
+        XCTAssertEqual(table.all.count, 1)
+        XCTAssertEqual(table.all.first?.name, "SAMMY")
+        XCTAssertEqual(table.all.first?.wins, 2)
+    }
+
+    func testMostRecentOpponentListedFirst() {
+        var table = RecordTable()
+        table.record(won: true, against: sam, on: Date(timeIntervalSince1970: 100))
+        table.record(won: true, against: alex, on: Date(timeIntervalSince1970: 200))
+        XCTAssertEqual(table.all.map(\.name), ["ALEX", "SAM"])
+    }
+
+    func testTableSurvivesSaving() throws {
+        var table = RecordTable()
+        table.record(won: true, forfeit: true, against: sam)
+        let data = try JSONEncoder().encode(table)
+        XCTAssertEqual(try JSONDecoder().decode(RecordTable.self, from: data), table)
     }
 }

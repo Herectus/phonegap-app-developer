@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var game: GameController
     @EnvironmentObject private var settings: GameSettings
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingMenu = false
 
     var body: some View {
@@ -30,10 +31,19 @@ struct ContentView: View {
                 .frame(maxWidth: 600)
             }
         }
-        .confirmationDialog("Game", isPresented: $showingMenu, titleVisibility: .hidden) {
-            Button("New Game") { game.newGame() }
-            Button("Power Off", role: .destructive) { game.powerOff() }
+        .confirmationDialog(game.isNearbyGameInProgress ? "Quitting now forfeits the game." : "Game",
+                            isPresented: $showingMenu,
+                            titleVisibility: game.isNearbyGameInProgress ? .visible : .hidden) {
+            if game.isNearbyGameInProgress {
+                Button("Quit and Forfeit", role: .destructive) { game.forfeit() }
+            } else {
+                Button("New Game") { game.newGame() }
+                Button("Power Off", role: .destructive) { game.powerOff() }
+            }
             Button("Cancel", role: .cancel) {}
+        }
+        .onChange(of: scenePhase) {
+            if scenePhase == .background { game.appEnteredBackground() }
         }
     }
 
@@ -128,6 +138,7 @@ struct PowerOffView: View {
 
                 if settings.mode == .nearby {
                     NearbyLobbyView(nearby: game.nearby)
+                    RecordsView(records: game.records)
                 } else {
                     RetroButton(title: "POWER ON", height: 64) { game.powerOn() }
                 }
@@ -163,6 +174,7 @@ struct PowerOffView: View {
                 Text("• VS CPU: you bat in the top half and pitch in the bottom against the computer.")
                 Text("• 2P · 1 PHONE: two players share this phone.")
                 Text("• 2P · 2 PHONES: each player uses their own iPhone in the same room. One taps HOST GAME, the other taps JOIN GAME. The host bats first.")
+                Text("• In a 2-phone game, quitting or leaving the app before the last out forfeits: you take the loss and your rival gets the win. A lost connection doesn't count for either player.")
             }
             .font(.system(size: 14, design: .rounded))
             .foregroundColor(.white.opacity(0.85))

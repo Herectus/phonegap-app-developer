@@ -69,8 +69,23 @@ not which pitch was thrown.
 How it stays fair: the host phone keeps the official score and makes the random rolls.
 When a pitch is thrown, both phones animate it, and the **batter's own phone** times the
 swing against its own animation, then sends the result. Network delay therefore never
-makes a swing early or late. If the connection drops (for example, one phone leaves the
-app or goes out of range) both phones show **CONNECTION LOST** and return to the menu.
+makes a swing early or late. Leaving the app mid-game forfeits (see below). If the
+connection simply drops, both phones show **CONNECTION LOST · NO RESULT**.
+
+### Quitting and head-to-head records
+
+* **Quitting forfeits.** In a 2-phone game, choosing **Quit and Forfeit** from the ⏻ menu,
+  or leaving the app (home screen, switching apps, locking the phone) before the final out,
+  forfeits the game. The quitter gets a loss and the other player gets a win.
+* **A lost connection is not a forfeit.** If the phones drop out of range or Wi-Fi turns
+  off and no forfeit message arrives, the game ends with **NO RESULT** for both players.
+* **Records per player pair.** Each phone gets a permanent player ID and a name you can set
+  on the 2P · 2 PHONES screen. When phones connect they swap IDs, and each phone keeps
+  your wins and losses against every opponent under **HEAD-TO-HEAD RECORDS**, with
+  forfeits also counted separately (FF). Renaming yourself keeps your record. The top bar
+  shows the current matchup, for example `VS SAM · 3-2`.
+* Records are stored only on each phone, so deleting the app erases them. **Clear**
+  erases them on purpose.
 
 ## Code layout
 
@@ -83,7 +98,7 @@ MegoBaseball/
     GameState.swift            Count, outs, bases, score, innings, steals, game end
   Game/GameController.swift    Real-time loop: pitch flight, CPU opponent, animations, nearby play
   Network/                     Multipeer Connectivity service and the messages the phones exchange
-  Support/                     Field geometry, square-wave sound, haptics, settings
+  Support/                     Field geometry, square-wave sound, haptics, settings, records
   Views/                       Field, scoreboard (7-segment digits), buttons, menu
 MegoBaseballTests/             XCTest suite for the engine
 ```

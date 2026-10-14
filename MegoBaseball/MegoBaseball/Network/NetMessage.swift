@@ -6,6 +6,10 @@ import Foundation
 /// phone times the swing against its own copy of the pitch animation, so network lag
 /// never decides whether a swing was early or late.
 enum NetMessage: Codable, Equatable {
+    /// Either way, right after connecting: who is on this phone.
+    case hello(playerID: String, name: String)
+    /// Either way: this player quit mid-game and forfeits.
+    case forfeit
     /// Host → guest: start a new game. The host is the visitor, the guest is home.
     case start(innings: Int)
     /// Guest → host: the guest pressed NEW GAME.

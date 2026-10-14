@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Runs a game in real time: pitch flight, swing timing, the computer opponent,
 /// and the LED animations and sounds that follow each pitch.
@@ -32,6 +33,12 @@ final class GameController: ObservableObject {
 
     let settings: GameSettings
     let nearby = NearbyService()
+    /// Wins and losses against each nearby opponent, saved on this phone.
+    let records = RecordBook()
+    /// The player on the other phone, once they've said hello.
+    @Published private(set) var opponent: Opponent?
+    /// Set once this game's win, loss or forfeit is in the record book.
+    private var resultRecorded = false
 
     /// Whether this phone is in a nearby game, and on which side of the link.
     private enum Link {
@@ -76,7 +83,13 @@ final class GameController: ObservableObject {
     /// The phone whose batter is up times the swing; in local games that's always this phone.
     private var judgesPitch: Bool { link == .none || isHumanBatting }
 
+    /// A nearby game that has started and not finished. Leaving one forfeits it.
+    var isNearbyGameInProgress: Bool {
+        link != .none && opponent != nil && phase != .off && phase != .gameOver
+    }
+
     var modeLabel: String {
+        if isNearbyGame, let opponent { return recordLine(against: opponent) }
         if isNearbyGame { return "NEARBY · 2 PHONES" }
         return isTwoPlayer ? "MANUAL · 2 PLAYER" : "AUTO · VS CPU"
     }
@@ -94,7 +107,8 @@ final class GameController: ObservableObject {
     func label(for team: Team) -> String {
         if isTwoPlayer { return team == .visitor ? "P1" : "P2" }
         if humanTeams.contains(team) { return "YOU" }
-        return team == remoteTeam ? "RIVAL" : "CPU"
+        if team == remoteTeam { return opponent?.name ?? "RIVAL" }
+        return "CPU"
     }
 
     private func winMessage(for winner: Team) -> String {
@@ -112,11 +126,19 @@ final class GameController: ObservableObject {
     }
 
     func powerOff() {
+        if isNearbyGameInProgress {
+            forfeit()
+            return
+        }
         if link != .none {
             link = .none
             remoteTeam = nil
             nearby.stop()
         }
+        shutDown()
+    }
+
+    private func shutDown() {
         cancelTasks()
         phase = .off
         ballIndex = nil
@@ -144,6 +166,7 @@ final class GameController: ObservableObject {
         remoteTeam = remote
         pendingPitch = nil
         notice = nil
+        resultRecorded = false
         engine = GameState(innings: innings)
         board = engine
         ballIndex = nil
@@ -498,6 +521,7 @@ final class GameController: ObservableObject {
 
         if let winner = engine.winner {
             phase = .gameOver
+            recordFinishedGame(winner: winner)
             message = winMessage(for: winner)
             play(.gameOver)
             haptic(.success)
@@ -557,12 +581,51 @@ final class GameController: ObservableObject {
 
     func hostNearbyGame() {
         notice = nil
-        nearby.host()
+        opponent = nil
+        nearby.host(name: settings.displayName)
     }
 
     func joinNearbyGame() {
         notice = nil
-        nearby.browse()
+        opponent = nil
+        nearby.browse(name: settings.displayName)
+    }
+
+    /// Quitting a nearby game before it ends: this phone takes the loss and tells the other
+    /// phone it won, then disconnects once the message has had time to go out.
+    func forfeit() {
+        guard isNearbyGameInProgress, let opponent else { return }
+        records.record(won: false, forfeit: true, against: opponent)
+        resultRecorded = true
+        nearby.send(.forfeit)
+        nearby.stop(after: 0.5)
+        link = .none
+        remoteTeam = nil
+        shutDown()
+        notice = "YOU FORFEITED · \(recordLine(against: opponent))"
+    }
+
+    /// Leaving the app mid-game counts as quitting. iOS gives us a moment to send the forfeit.
+    func appEnteredBackground() {
+        guard isNearbyGameInProgress else { return }
+        let app = UIApplication.shared
+        let taskID = app.beginBackgroundTask(withName: "Forfeit", expirationHandler: nil)
+        forfeit()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            app.endBackgroundTask(taskID)
+        }
+    }
+
+    func recordLine(against opponent: Opponent) -> String {
+        let summary = records.table.record(against: opponent)?.summary ?? "0-0"
+        return "VS \(opponent.name) · \(summary)"
+    }
+
+    private func recordFinishedGame(winner: Team) {
+        guard link != .none, !resultRecorded, let opponent else { return }
+        resultRecorded = true
+        records.record(won: humanTeams.contains(winner), forfeit: false, against: opponent)
     }
 
     func cancelNearby() {
@@ -572,13 +635,11 @@ final class GameController: ObservableObject {
     private func nearbyConnected() {
         guard let role = nearby.role else { return }
         link = role == .host ? .host : .guest
+        // Introduce ourselves so each phone knows whose record this game counts toward.
+        nearby.send(.hello(playerID: settings.playerID, name: settings.displayName))
         if link == .host {
-            // The host plays the visitors and starts things off; the guest waits for `.start`.
-            // A short pause gives the guest's side of the connection time to settle.
-            run { controller in
-                try await controller.pause(0.5)
-                controller.newGame()
-            }
+            // The host plays the visitors and starts the game once it knows who joined.
+            if opponent != nil, phase == .off { newGame() }
         } else {
             humanTeams = [.home]
             remoteTeam = .visitor
@@ -588,13 +649,34 @@ final class GameController: ObservableObject {
 
     private func nearbyDisconnected() {
         guard link != .none else { return }
+        // A dropped connection with no forfeit message (out of range, Wi-Fi off) isn't a
+        // quit, so it doesn't count for either player.
+        let midGame = isNearbyGameInProgress
         link = .none
-        powerOff()
-        notice = "CONNECTION LOST"
+        remoteTeam = nil
+        shutDown()
+        notice = midGame ? "CONNECTION LOST · NO RESULT" : "OTHER PLAYER DISCONNECTED"
     }
 
     private func handle(_ message: NetMessage) {
         switch (link, message) {
+        case (_, .hello(let id, let name)):
+            let trimmed = String(name.prefix(GameSettings.maxNameLength)).uppercased()
+            opponent = Opponent(id: id, name: trimmed.isEmpty ? "RIVAL" : trimmed)
+            if link == .host, phase == .off { newGame() }
+
+        case (.host, .forfeit), (.guest, .forfeit):
+            guard isNearbyGameInProgress, let opponent else { return }
+            records.record(won: true, forfeit: true, against: opponent)
+            resultRecorded = true
+            link = .none
+            remoteTeam = nil
+            nearby.stop()
+            shutDown()
+            play(.gameOver)
+            haptic(.success)
+            notice = "\(opponent.name) QUIT · YOU WIN BY FORFEIT · \(recordLine(against: opponent))"
+
         case (.guest, .start(let innings)):
             startGame(innings: innings, humans: [.home], remote: .visitor)
 
