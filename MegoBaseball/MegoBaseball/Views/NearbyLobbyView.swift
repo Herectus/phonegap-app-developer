@@ -43,6 +43,9 @@ struct NearbyLobbyView: View {
             case .connected(let name):
                 status("CONNECTED TO \(name.uppercased())", spinning: false)
                 hint(nearby.role == .host ? "Starting the game…" : "Waiting for the host to start…")
+
+            case .reconnecting:
+                status("RECONNECTING…", spinning: true)
             }
         }
     }

@@ -214,6 +214,10 @@ final class NetMessageTests: XCTestCase {
         let messages: [NetMessage] = [
             .hello(playerID: "ABC-123", name: "SAM"),
             .forfeit,
+            .rainDelay(onCall: true),
+            .resumeWindow,
+            .readyToResume,
+            .resumeGame(state: state),
             .start(innings: 9),
             .newGameRequest,
             .pitchRequest(.curve),
@@ -277,5 +281,69 @@ final class RecordTableTests: XCTestCase {
         table.record(won: true, forfeit: true, against: sam)
         let data = try JSONEncoder().encode(table)
         XCTAssertEqual(try JSONDecoder().decode(RecordTable.self, from: data), table)
+    }
+}
+
+final class RainDelayTests: XCTestCase {
+    private let start = Date(timeIntervalSince1970: 1_000)
+
+    private func openDelay() -> RainDelay {
+        var delay = RainDelay()
+        delay.openWindow(now: start)
+        return delay
+    }
+
+    func testNoWindowWhileAnyoneIsOnACallOrDisconnected() {
+        var delay = RainDelay()
+        delay.themOnCall = true
+        XCTAssertFalse(delay.readyToOpenWindow)
+        delay.themOnCall = false
+        delay.connected = false
+        XCTAssertFalse(delay.readyToOpenWindow)
+        delay.connected = true
+        XCTAssertTrue(delay.readyToOpenWindow)
+        XCTAssertEqual(delay.verdict(now: start.addingTimeInterval(1_000)), .waiting)
+    }
+
+    func testBothReadyResumesRightAway() {
+        var delay = openDelay()
+        delay.meReady = true
+        delay.themReady = true
+        XCTAssertEqual(delay.verdict(now: start.addingTimeInterval(5)), .resume)
+    }
+
+    func testOnlyOnePlayerReadyWaitsUntilTheDeadline() {
+        var delay = openDelay()
+        delay.meReady = true
+        XCTAssertEqual(delay.verdict(now: start.addingTimeInterval(59)), .waiting)
+        XCTAssertEqual(delay.verdict(now: start.addingTimeInterval(60)), .opponentForfeits)
+    }
+
+    func testPlayerWhoIgnoresTheWindowForfeits() {
+        var delay = openDelay()
+        delay.themReady = true
+        XCTAssertEqual(delay.verdict(now: start.addingTimeInterval(61)), .youForfeit)
+    }
+
+    func testNeitherReadyCancelsTheGame() {
+        let delay = openDelay()
+        XCTAssertEqual(delay.verdict(now: start.addingTimeInterval(61)), .cancelled)
+    }
+
+    func testNewCallClosesTheWindowAndClearsReady() {
+        var delay = openDelay()
+        delay.meReady = true
+        delay.themOnCall = true
+        delay.closeWindow()
+        XCTAssertFalse(delay.windowOpen)
+        XCTAssertFalse(delay.meReady)
+        XCTAssertEqual(delay.verdict(now: start.addingTimeInterval(500)), .waiting)
+    }
+
+    func testCountdown() {
+        let delay = openDelay()
+        XCTAssertEqual(delay.secondsLeft(now: start), 60)
+        XCTAssertEqual(delay.secondsLeft(now: start.addingTimeInterval(59.2)), 1)
+        XCTAssertEqual(delay.secondsLeft(now: start.addingTimeInterval(90)), 0)
     }
 }

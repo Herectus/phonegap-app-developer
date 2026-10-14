@@ -22,6 +22,8 @@ struct ContentView: View {
                     if game.phase == .gameOver {
                         RetroButton(title: game.isNearbyGuest ? "ASK HOST FOR NEW GAME" : "NEW GAME",
                                     height: 64) { game.newGame() }
+                    } else if let delay = game.rainDelay {
+                        RainDelayView(delay: delay)
                     } else {
                         ControlPanel()
                     }
@@ -43,7 +45,11 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         }
         .onChange(of: scenePhase) {
-            if scenePhase == .background { game.appEnteredBackground() }
+            switch scenePhase {
+            case .background: game.appEnteredBackground()
+            case .active: game.appBecameActive()
+            default: break
+            }
         }
     }
 

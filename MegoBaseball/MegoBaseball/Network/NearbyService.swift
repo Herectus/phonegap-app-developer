@@ -18,6 +18,8 @@ final class NearbyService: NSObject, ObservableObject {
         case browsing
         case connecting(String)
         case connected(String)
+        /// Mid-game: the link dropped and we're looking for the same opponent again.
+        case reconnecting
     }
 
     /// Must match the `NSBonjourServices` entries in the Info.plist.
@@ -38,6 +40,10 @@ final class NearbyService: NSObject, ObservableObject {
     private var browser: MCNearbyServiceBrowser?
     /// Bumped by `stop()` so a delayed `stop(after:)` can't cut off a newer connection.
     private var generation = 0
+    /// This player's permanent ID, advertised so a dropped opponent can find us again.
+    private var playerID = ""
+    /// While reconnecting: the only player we'll connect to.
+    private var expectedOpponentID: String?
 
     override init() {
         myPeer = MCPeerID(displayName: UIDevice.current.name)
@@ -62,18 +68,23 @@ final class NearbyService: NSObject, ObservableObject {
         return false
     }
 
-    func host(name: String) {
+    func host(name: String, playerID: String) {
         prepare(name: name)
+        self.playerID = playerID
+        expectedOpponentID = nil
         role = .host
-        let advertiser = MCNearbyServiceAdvertiser(peer: myPeer, discoveryInfo: nil, serviceType: Self.serviceType)
+        let advertiser = MCNearbyServiceAdvertiser(peer: myPeer, discoveryInfo: ["id": playerID],
+                                                   serviceType: Self.serviceType)
         advertiser.delegate = self
         advertiser.startAdvertisingPeer()
         self.advertiser = advertiser
         status = .hosting
     }
 
-    func browse(name: String) {
+    func browse(name: String, playerID: String) {
         prepare(name: name)
+        self.playerID = playerID
+        expectedOpponentID = nil
         role = .guest
         foundHosts = []
         let browser = MCNearbyServiceBrowser(peer: myPeer, serviceType: Self.serviceType)
@@ -86,7 +97,31 @@ final class NearbyService: NSObject, ObservableObject {
     func join(_ host: MCPeerID) {
         guard role == .guest, let browser else { return }
         status = .connecting(host.displayName)
-        browser.invitePeer(host, to: session, withContext: nil, timeout: 20)
+        browser.invitePeer(host, to: session, withContext: Data(playerID.utf8), timeout: 20)
+    }
+
+    /// After a mid-game drop: host again or look again, but only for the same opponent,
+    /// and connect to them automatically.
+    func reconnect(as role: Role, name: String, playerID: String, opponentID: String) {
+        switch role {
+        case .host: host(name: name, playerID: playerID)
+        case .guest: browse(name: name, playerID: playerID)
+        }
+        expectedOpponentID = opponentID
+        status = .reconnecting
+    }
+
+    /// Guest side: an invitation failed while reconnecting, so search again shortly.
+    private func retryReconnecting() {
+        guard role == .guest, let opponentID = expectedOpponentID else { return }
+        let expected = generation
+        let name = myPeer.displayName
+        let id = playerID
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard let self, self.generation == expected, self.status == .reconnecting else { return }
+            self.reconnect(as: .guest, name: name, playerID: id, opponentID: opponentID)
+        }
     }
 
     /// Disconnects after a short delay, so a last message (like a forfeit) can go out first.
@@ -134,6 +169,9 @@ final class NearbyService: NSObject, ObservableObject {
             if wasConnected {
                 stop()
                 onDisconnected?()
+            } else if expectedOpponentID != nil {
+                status = .reconnecting
+                retryReconnecting()
             } else if role == .guest {
                 status = .browsing // invitation declined or timed out; keep looking
             } else if role == .host {
@@ -149,14 +187,22 @@ final class NearbyService: NSObject, ObservableObject {
         onMessage?(message)
     }
 
-    private func invitation(from peer: MCPeerID, reply: @escaping (Bool, MCSession?) -> Void) {
+    private func invitation(from peer: MCPeerID, context: Data?, reply: @escaping (Bool, MCSession?) -> Void) {
         // Accept the first player who asks while we're waiting; turn down anyone else.
-        let accept = status == .hosting && session.connectedPeers.isEmpty
+        // While reconnecting, only the opponent from the interrupted game may join.
+        let waiting = status == .hosting || status == .reconnecting
+        let senderID = context.flatMap { String(data: $0, encoding: .utf8) }
+        let allowed = expectedOpponentID == nil || senderID == expectedOpponentID
+        let accept = waiting && allowed && session.connectedPeers.isEmpty
         if accept { status = .connecting(peer.displayName) }
         reply(accept, accept ? session : nil)
     }
 
-    private func found(_ peer: MCPeerID) {
+    private func found(_ peer: MCPeerID, info: [String: String]?) {
+        if status == .reconnecting {
+            if let expected = expectedOpponentID, info?["id"] == expected { join(peer) }
+            return
+        }
         guard !foundHosts.contains(peer) else { return }
         foundHosts.append(peer)
     }
@@ -192,7 +238,7 @@ extension NearbyService: MCNearbyServiceAdvertiserDelegate {
                                 didReceiveInvitationFromPeer peerID: MCPeerID,
                                 withContext context: Data?,
                                 invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        Task { @MainActor in self.invitation(from: peerID, reply: invitationHandler) }
+        Task { @MainActor in self.invitation(from: peerID, context: context, reply: invitationHandler) }
     }
 
     nonisolated func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
@@ -203,7 +249,7 @@ extension NearbyService: MCNearbyServiceAdvertiserDelegate {
 extension NearbyService: MCNearbyServiceBrowserDelegate {
     nonisolated func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID,
                              withDiscoveryInfo info: [String: String]?) {
-        Task { @MainActor in self.found(peerID) }
+        Task { @MainActor in self.found(peerID, info: info) }
     }
 
     nonisolated func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {

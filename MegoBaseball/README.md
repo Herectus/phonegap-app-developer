@@ -69,16 +69,26 @@ not which pitch was thrown.
 How it stays fair: the host phone keeps the official score and makes the random rolls.
 When a pitch is thrown, both phones animate it, and the **batter's own phone** times the
 swing against its own animation, then sends the result. Network delay therefore never
-makes a swing early or late. Leaving the app mid-game forfeits (see below). If the
-connection simply drops, both phones show **CONNECTION LOST · NO RESULT**.
+makes a swing early or late. Leaving the app mid-game forfeits, except for phone calls,
+which cause a rain delay (see below).
 
-### Quitting and head-to-head records
+### Quitting, rain delays and head-to-head records
 
 * **Quitting forfeits.** In a 2-phone game, choosing **Quit and Forfeit** from the ⏻ menu,
   or leaving the app (home screen, switching apps, locking the phone) before the final out,
   forfeits the game. The quitter gets a loss and the other player gets a win.
-* **A lost connection is not a forfeit.** If the phones drop out of range or Wi-Fi turns
-  off and no forfeit message arrives, the game ends with **NO RESULT** for both players.
+* **Phone calls cause a rain delay instead.** When a call rings on either phone (cellular,
+  FaceTime, or a calling app that uses the iPhone call screen), the game pauses on both phones
+  and the other player sees **RAIN DELAY · NAME IS ON A CALL**. Answering the call is not a
+  forfeit. iOS drops the link between the phones during the call, so they reconnect on their
+  own afterwards.
+* **60 seconds to resume.** Once the call is over and the phones are connected again, both
+  show **GAME RESUMES** with a 60-second countdown and a **RESUME** button. Both tap it: play
+  continues exactly where it stopped (a pitch in the air is thrown again). Only one taps it:
+  the other player forfeits. Neither taps it: the game is cancelled with no result.
+* **A lost connection is not a forfeit.** If the phones drop out of range mid-game, it is
+  also treated as a rain delay and they keep trying to reconnect. While they can't reach
+  each other, either player can tap **Call Off Game (No Result)**.
 * **Records per player pair.** Each phone gets a permanent player ID and a name you can set
   on the 2P · 2 PHONES screen. When phones connect they swap IDs, and each phone keeps
   your wins and losses against every opponent under **HEAD-TO-HEAD RECORDS**, with

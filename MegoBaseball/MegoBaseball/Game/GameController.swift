@@ -14,6 +14,8 @@ final class GameController: ObservableObject {
         /// Showing what just happened.
         case result
         case gameOver
+        /// A 2-phone game paused by a phone call or a dropped connection.
+        case delayed
     }
 
     /// What the scoreboard and field show. Trails `engine` while a play animates.
@@ -39,6 +41,9 @@ final class GameController: ObservableObject {
     @Published private(set) var opponent: Opponent?
     /// Set once this game's win, loss or forfeit is in the record book.
     private var resultRecorded = false
+    /// Non-nil while a 2-phone game is in a rain delay.
+    @Published private(set) var rainDelay: RainDelay?
+    private let calls = CallMonitor()
 
     /// Whether this phone is in a nearby game, and on which side of the link.
     private enum Link {
@@ -67,6 +72,7 @@ final class GameController: ObservableObject {
         nearby.onConnected = { [weak self] in self?.nearbyConnected() }
         nearby.onDisconnected = { [weak self] in self?.nearbyDisconnected() }
         nearby.onMessage = { [weak self] message in self?.handle(message) }
+        calls.onChange = { [weak self] onCall in self?.callChanged(onCall: onCall) }
     }
 
     // MARK: - Who controls what
@@ -139,6 +145,7 @@ final class GameController: ObservableObject {
     }
 
     private func shutDown() {
+        rainDelay = nil
         cancelTasks()
         phase = .off
         ballIndex = nil
@@ -582,13 +589,13 @@ final class GameController: ObservableObject {
     func hostNearbyGame() {
         notice = nil
         opponent = nil
-        nearby.host(name: settings.displayName)
+        nearby.host(name: settings.displayName, playerID: settings.playerID)
     }
 
     func joinNearbyGame() {
         notice = nil
         opponent = nil
-        nearby.browse(name: settings.displayName)
+        nearby.browse(name: settings.displayName, playerID: settings.playerID)
     }
 
     /// Quitting a nearby game before it ends: this phone takes the loss and tells the other
@@ -605,9 +612,15 @@ final class GameController: ObservableObject {
         notice = "YOU FORFEITED · \(recordLine(against: opponent))"
     }
 
-    /// Leaving the app mid-game counts as quitting. iOS gives us a moment to send the forfeit.
+    /// Leaving the app mid-game counts as quitting, unless it's for a phone call (a rain
+    /// delay) or a rain delay is already on. iOS gives us a moment to send the forfeit.
     func appEnteredBackground() {
         guard isNearbyGameInProgress else { return }
+        if calls.isOnCall {
+            callChanged(onCall: true)
+            return
+        }
+        if rainDelay != nil { return } // the 60-second resume window decides
         let app = UIApplication.shared
         let taskID = app.beginBackgroundTask(withName: "Forfeit", expirationHandler: nil)
         forfeit()
@@ -634,6 +647,10 @@ final class GameController: ObservableObject {
 
     private func nearbyConnected() {
         guard let role = nearby.role else { return }
+        if rainDelay != nil, link != .none {
+            reconnectedDuringDelay()
+            return
+        }
         link = role == .host ? .host : .guest
         // Introduce ourselves so each phone knows whose record this game counts toward.
         nearby.send(.hello(playerID: settings.playerID, name: settings.displayName))
@@ -649,13 +666,19 @@ final class GameController: ObservableObject {
 
     private func nearbyDisconnected() {
         guard link != .none else { return }
-        // A dropped connection with no forfeit message (out of range, Wi-Fi off) isn't a
-        // quit, so it doesn't count for either player.
-        let midGame = isNearbyGameInProgress
+        if isNearbyGameInProgress {
+            // Mid-game: pause as a rain delay and look for the same opponent again.
+            // A dropped link isn't a quit, so it never counts against either player.
+            enterRainDelay()
+            rainDelay?.connected = false
+            reconnect()
+            updateDelayMessage()
+            return
+        }
         link = .none
         remoteTeam = nil
         shutDown()
-        notice = midGame ? "CONNECTION LOST · NO RESULT" : "OTHER PLAYER DISCONNECTED"
+        notice = "OTHER PLAYER DISCONNECTED"
     }
 
     private func handle(_ message: NetMessage) {
@@ -676,6 +699,35 @@ final class GameController: ObservableObject {
             play(.gameOver)
             haptic(.success)
             notice = "\(opponent.name) QUIT · YOU WIN BY FORFEIT · \(recordLine(against: opponent))"
+
+        case (_, .rainDelay(let onCall)):
+            guard isNearbyGameInProgress else { return }
+            if onCall {
+                enterRainDelay()
+                rainDelay?.themOnCall = true
+                rainDelay?.closeWindow()
+                haptic(.warning)
+            } else {
+                guard rainDelay != nil else { return }
+                rainDelay?.themOnCall = false
+                openResumeWindowIfReady()
+            }
+            updateDelayMessage()
+
+        case (.guest, .resumeWindow):
+            guard rainDelay != nil else { return }
+            rainDelay?.openWindow(now: Date())
+            announceResumeWindow()
+
+        case (_, .readyToResume):
+            guard rainDelay?.windowOpen == true else { return }
+            rainDelay?.themReady = true
+            updateDelayMessage()
+            checkRainDelay()
+
+        case (.guest, .resumeGame(let state)):
+            guard rainDelay != nil else { return }
+            resume(from: state)
 
         case (.guest, .start(let innings)):
             startGame(innings: innings, humans: [.home], remote: .visitor)
@@ -710,6 +762,12 @@ final class GameController: ObservableObject {
 
         case (.guest, .result(let serial, let events, let basesBefore, let swung, let state)):
             guard serial == pitchSerial else { return }
+            if rainDelay != nil {
+                // The play finished just as the delay began; take the result without animating.
+                engine = state
+                board = state
+                return
+            }
             phase = .result
             ballIndex = nil
             engine = state
@@ -719,6 +777,178 @@ final class GameController: ObservableObject {
 
         default:
             break
+        }
+    }
+
+    // MARK: - Rain delays
+
+    /// Tapped on the rain delay screen during the 60-second window.
+    func readyToResume() {
+        guard rainDelay?.windowOpen == true, rainDelay?.meReady == false else { return }
+        rainDelay?.meReady = true
+        haptic(.tap)
+        nearby.send(.readyToResume)
+        updateDelayMessage()
+        checkRainDelay()
+    }
+
+    /// While the phones can't reach each other, either player may end the game with no result.
+    func callOffGame() {
+        guard rainDelay?.connected == false else { return }
+        finishDelayedGame(notice: "GAME CALLED OFF · NO RESULT")
+    }
+
+    /// Back in the app: notice a call that ended while we were away and settle any expired window.
+    func appBecameActive() {
+        guard rainDelay != nil else { return }
+        if rainDelay?.meOnCall == true && !calls.isOnCall {
+            callChanged(onCall: false)
+        }
+        if rainDelay?.connected == false && nearby.status == .idle {
+            reconnect()
+        }
+        checkRainDelay()
+    }
+
+    private func callChanged(onCall: Bool) {
+        guard isNearbyGameInProgress else { return }
+        if onCall {
+            guard rainDelay?.meOnCall != true else { return }
+            enterRainDelay()
+            rainDelay?.meOnCall = true
+            rainDelay?.closeWindow()
+            nearby.send(.rainDelay(onCall: true))
+        } else {
+            guard rainDelay?.meOnCall == true else { return }
+            rainDelay?.meOnCall = false
+            nearby.send(.rainDelay(onCall: false))
+            openResumeWindowIfReady()
+        }
+        updateDelayMessage()
+    }
+
+    /// Freezes play exactly where it is. A pitch in the air is simply thrown again afterwards.
+    private func enterRainDelay() {
+        guard rainDelay == nil else { return }
+        cancelTasks()
+        rainDelay = RainDelay()
+        board = engine
+        ballIndex = nil
+        litSpot = nil
+        battedBallPosition = nil
+        stealAttempted = false
+        pendingPitch = nil
+        phase = .delayed
+        play(.sideRetired)
+        // Check the resume window twice a second; also catches up after the app was away.
+        run { controller in
+            while true {
+                try await controller.pause(0.5)
+                controller.checkRainDelay()
+            }
+        }
+    }
+
+    private func reconnect() {
+        guard let opponent, link != .none else { return }
+        // Keep the same roles as before the drop: the host hosts again, the guest looks again.
+        let role: NearbyService.Role = link == .host ? .host : .guest
+        nearby.reconnect(as: role, name: settings.displayName, playerID: settings.playerID, opponentID: opponent.id)
+    }
+
+    private func reconnectedDuringDelay() {
+        rainDelay?.connected = true
+        nearby.send(.hello(playerID: settings.playerID, name: settings.displayName))
+        // Bring the other phone up to date on our call and RESUME status.
+        nearby.send(.rainDelay(onCall: rainDelay?.meOnCall ?? false))
+        if rainDelay?.meReady == true { nearby.send(.readyToResume) }
+        if link == .host, rainDelay?.windowOpen == true { nearby.send(.resumeWindow) }
+        updateDelayMessage()
+        openResumeWindowIfReady()
+    }
+
+    /// The host starts the 60-second window once both phones are connected and nobody is on a call.
+    private func openResumeWindowIfReady() {
+        guard link == .host, rainDelay?.readyToOpenWindow == true else { return }
+        rainDelay?.openWindow(now: Date())
+        nearby.send(.resumeWindow)
+        announceResumeWindow()
+    }
+
+    private func announceResumeWindow() {
+        play(.walk)
+        haptic(.warning)
+        updateDelayMessage()
+    }
+
+    private func updateDelayMessage() {
+        guard let delay = rainDelay else { return }
+        let name = opponent?.name ?? "RIVAL"
+        if delay.windowOpen {
+            message = delay.meReady ? "READY · WAITING FOR \(name)" : "TAP RESUME WITHIN 60 SECONDS"
+        } else if delay.meOnCall {
+            message = "RAIN DELAY · YOU'RE ON A CALL"
+        } else if delay.themOnCall {
+            message = "RAIN DELAY · \(name) IS ON A CALL"
+        } else if !delay.connected {
+            message = "RAIN DELAY · RECONNECTING"
+        } else {
+            message = "RAIN DELAY"
+        }
+    }
+
+    private func checkRainDelay() {
+        guard let delay = rainDelay, let opponent else { return }
+        switch delay.verdict(now: Date()) {
+        case .waiting:
+            break
+        case .resume:
+            // The host sends the official state; the guest waits for it.
+            if link == .host {
+                nearby.send(.resumeGame(state: engine))
+                resume(from: engine)
+            }
+        case .opponentForfeits:
+            records.record(won: true, forfeit: true, against: opponent)
+            resultRecorded = true
+            play(.gameOver)
+            haptic(.success)
+            finishDelayedGame(notice: "\(opponent.name) DIDN'T RESUME · YOU WIN BY FORFEIT · \(recordLine(against: opponent))")
+        case .youForfeit:
+            records.record(won: false, forfeit: true, against: opponent)
+            resultRecorded = true
+            finishDelayedGame(notice: "YOU DIDN'T RESUME IN TIME · FORFEIT · \(recordLine(against: opponent))")
+        case .cancelled:
+            finishDelayedGame(notice: "NEITHER PLAYER RESUMED · GAME CANCELLED")
+        }
+    }
+
+    private func finishDelayedGame(notice text: String) {
+        link = .none
+        remoteTeam = nil
+        nearby.stop(after: 0.5)
+        shutDown()
+        notice = text
+    }
+
+    private func resume(from state: GameState) {
+        cancelTasks()
+        rainDelay = nil
+        pendingPitch = nil
+        engine = state
+        board = state
+        if let winner = state.winner {
+            phase = .gameOver
+            recordFinishedGame(winner: winner)
+            message = winMessage(for: winner)
+            return
+        }
+        phase = .result
+        message = "RAIN DELAY OVER · PLAY BALL!"
+        play(.gameStart)
+        run { controller in
+            try await controller.pause(1.4)
+            controller.enterReady()
         }
     }
 

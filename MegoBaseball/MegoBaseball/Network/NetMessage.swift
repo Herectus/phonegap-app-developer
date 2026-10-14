@@ -10,6 +10,15 @@ enum NetMessage: Codable, Equatable {
     case hello(playerID: String, name: String)
     /// Either way: this player quit mid-game and forfeits.
     case forfeit
+    /// Either way: this player's phone call started (true) or ended (false). Also sent after
+    /// reconnecting so both phones agree on who is still on a call.
+    case rainDelay(onCall: Bool)
+    /// Host → guest: nobody is on a call; the 60-second resume window starts now.
+    case resumeWindow
+    /// Either way: this player tapped RESUME.
+    case readyToResume
+    /// Host → guest: both tapped RESUME; play on from this exact state.
+    case resumeGame(state: GameState)
     /// Host → guest: start a new game. The host is the visitor, the guest is home.
     case start(innings: Int)
     /// Guest → host: the guest pressed NEW GAME.
