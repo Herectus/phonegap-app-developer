@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Red-LED scoreboard: score for each team, inning, ball/strike/out lamps and a message line.
 struct ScoreboardView: View {
+    @Environment(\.uiScale) private var scale
     @EnvironmentObject private var game: GameController
 
     var body: some View {
@@ -19,8 +20,8 @@ struct ScoreboardView: View {
                             Image(systemName: "arrowtriangle.down.fill")
                                 .foregroundColor(board.half == .bottom ? Theme.ledOn : Theme.ledOff)
                         }
-                        .font(.system(size: 9))
-                        SevenSegmentNumber(value: board.inning, digits: 2, height: 34)
+                        .font(.system(size: 9 * scale))
+                        SevenSegmentNumber(value: board.inning, digits: 2, height: 34 * scale)
                     }
                 }
                 Spacer()
@@ -34,7 +35,7 @@ struct ScoreboardView: View {
             }
 
             Text(game.message.isEmpty ? " " : game.message)
-                .font(Theme.ledFont(15))
+                .font(Theme.ledFont(15 * scale))
                 .foregroundColor(Theme.ledOn)
                 .shadow(color: Theme.ledOn.opacity(0.7), radius: 4)
                 .lineLimit(1)
@@ -55,10 +56,10 @@ struct ScoreboardView: View {
     private func teamScore(_ team: Team, board: GameState) -> some View {
         VStack(spacing: 4) {
             caption(team == .visitor ? "VIS · \(game.label(for: team))" : "HOME · \(game.label(for: team))")
-            SevenSegmentNumber(value: board.score(of: team), digits: 2, height: 44)
+            SevenSegmentNumber(value: board.score(of: team), digits: 2, height: 44 * scale)
             Circle()
                 .fill(board.battingTeam == team && game.phase != .off ? Theme.ledOn : Theme.ledOff)
-                .frame(width: 6, height: 6)
+                .frame(width: 6 * scale, height: 6 * scale)
         }
     }
 
@@ -66,14 +67,14 @@ struct ScoreboardView: View {
         HStack(spacing: 5) {
             caption(title)
             ForEach(0..<count, id: \.self) { index in
-                LED(isOn: index < lit, diameter: 11)
+                LED(isOn: index < lit, diameter: 11 * scale)
             }
         }
     }
 
     private func caption(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
             .foregroundColor(.white.opacity(0.85))
     }
 

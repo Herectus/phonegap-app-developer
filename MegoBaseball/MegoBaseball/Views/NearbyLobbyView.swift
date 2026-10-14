@@ -1,8 +1,9 @@
 import SwiftUI
 import MultipeerConnectivity
 
-/// Host or join a game with another iPhone in the same room.
+/// Host or join a game with another iPhone or iPad in the same room.
 struct NearbyLobbyView: View {
+    @Environment(\.uiScale) private var scale
     @EnvironmentObject private var game: GameController
     @ObservedObject var nearby: NearbyService
 
@@ -19,12 +20,12 @@ struct NearbyLobbyView: View {
                     RetroButton(title: "HOST GAME", height: 64) { game.hostNearbyGame() }
                     RetroButton(title: "JOIN GAME", height: 64) { game.joinNearbyGame() }
                 }
-                hint("Both phones need Wi-Fi or Bluetooth turned on and must be in the same room. "
+                hint("Both devices need Wi-Fi or Bluetooth turned on and must be in the same room. "
                      + "The host's innings setting is used.")
 
             case .hosting:
                 status("WAITING FOR A PLAYER…", spinning: true)
-                hint("On the other iPhone, choose 2P · 2 PHONES and tap JOIN GAME.")
+                hint("On the other iPhone or iPad, choose 2P · 2 DEVICES and tap JOIN GAME.")
                 cancelButton
 
             case .browsing:
@@ -52,7 +53,7 @@ struct NearbyLobbyView: View {
 
     private var cancelButton: some View {
         Button("Cancel") { game.cancelNearby() }
-            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .font(.system(size: 15 * scale, weight: .bold, design: .rounded))
             .foregroundColor(Theme.buttonOrange)
     }
 
@@ -60,7 +61,7 @@ struct NearbyLobbyView: View {
         HStack(spacing: 8) {
             if spinning { ProgressView().tint(Theme.ledOn) }
             Text(text)
-                .font(Theme.ledFont(15))
+                .font(Theme.ledFont(15 * scale))
                 .foregroundColor(Theme.ledOn)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -69,7 +70,7 @@ struct NearbyLobbyView: View {
 
     private func hint(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 13, design: .rounded))
+            .font(.system(size: 13 * scale, design: .rounded))
             .foregroundColor(.white.opacity(0.7))
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
@@ -78,18 +79,19 @@ struct NearbyLobbyView: View {
 
 /// The name the other phone sees and keeps your record under.
 private struct NameField: View {
+    @Environment(\.uiScale) private var scale
     @EnvironmentObject private var settings: GameSettings
 
     var body: some View {
         HStack {
             Text("YOUR NAME")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(size: 12 * scale, weight: .bold, design: .rounded))
                 .foregroundColor(.white.opacity(0.7))
             TextField("Name", text: $settings.playerName)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
-                .font(Theme.ledFont(16))
+                .font(Theme.ledFont(16 * scale))
                 .foregroundColor(Theme.ledOn)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -105,6 +107,7 @@ private struct NameField: View {
 
 /// Wins and losses against everyone this phone has played nearby.
 struct RecordsView: View {
+    @Environment(\.uiScale) private var scale
     @ObservedObject var records: RecordBook
     @State private var confirmingClear = false
 
@@ -117,19 +120,19 @@ struct RecordsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("HEAD-TO-HEAD RECORDS")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(.system(size: 12 * scale, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.7))
                 Spacer()
                 if !all.isEmpty {
                     Button("Clear") { confirmingClear = true }
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(.system(size: 13 * scale, weight: .bold, design: .rounded))
                         .foregroundColor(Theme.buttonOrange)
                 }
             }
 
             if all.isEmpty {
-                Text("No 2-phone games yet.")
-                    .font(.system(size: 13, design: .rounded))
+                Text("No 2-device games yet.")
+                    .font(.system(size: 13 * scale, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
             }
 
@@ -145,13 +148,13 @@ struct RecordsView: View {
                     Text("W \(entry.wins)  L \(entry.losses)")
                         .foregroundColor(Theme.ledOn)
                 }
-                .font(Theme.ledFont(14))
+                .font(Theme.ledFont(14 * scale))
                 .accessibilityElement(children: .combine)
             }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.5)))
-        .confirmationDialog("Erase every head-to-head record on this phone?",
+        .confirmationDialog("Erase every head-to-head record on this device?",
                             isPresented: $confirmingClear, titleVisibility: .visible) {
             Button("Erase Records", role: .destructive) { records.clear() }
             Button("Cancel", role: .cancel) {}

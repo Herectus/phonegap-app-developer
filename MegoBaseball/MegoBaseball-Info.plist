@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Baseball 2 uses the local network to find and play against another iPhone in the same room.</string>
+	<string>Baseball 2 uses the local network to find and play against another iPhone or iPad in the same room.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_mego-baseball._tcp</string>

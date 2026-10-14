@@ -33,3 +33,16 @@ struct LED: View {
             .shadow(color: isOn ? Theme.ledOn.opacity(0.9) : .clear, radius: diameter * 0.5)
     }
 }
+
+/// How much to enlarge text, buttons and the scoreboard: 1 on iPhone, larger on a
+/// full-size iPad window.
+private struct UIScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    var uiScale: CGFloat {
+        get { self[UIScaleKey.self] }
+        set { self[UIScaleKey.self] = newValue }
+    }
+}

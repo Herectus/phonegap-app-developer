@@ -8,7 +8,8 @@ everything is drawn in code and the sounds are synthesized square waves.
 
 ## Build and run
 
-Requirements: a Mac with **Xcode 16 or later**, targeting **iOS 17+**.
+Requirements: a Mac with **Xcode 16 or later**, targeting **iOS 17+ / iPadOS 17+**.
+The app runs on both iPhone and iPad.
 
 1. Open `MegoBaseball/MegoBaseball.xcodeproj` in Xcode.
 2. Select the **MegoBaseball** target → *Signing & Capabilities*, choose your Team, and
@@ -39,24 +40,35 @@ The project uses Xcode 16 folder-synced groups, so any `.swift` file you add und
 * **Game length:** 3, 6 or 9 innings (default 9), with extra innings on a tie and a
   walk-off when the home team takes the lead in the last inning.
 
+### iPad
+
+* Text, buttons and the scoreboard are larger on iPad.
+* **Portrait:** the same layout as iPhone, just bigger. **Landscape:** the field is on the
+  left with the scoreboard and buttons on the right.
+* Split View and Stage Manager work too; a narrow window uses the iPhone-size layout.
+* **Keyboard** (for example an iPad keyboard case): **Space** swings, **S** steals,
+  **1 / 2 / 3** (or **F / C / V**) throw a fastball, change-up or curve.
+* iPads have no vibration motor, so the Haptics switch is hidden there.
+* 2-device games work between any mix of iPhones and iPads.
+
 ### Modes
 
 * **AUTO, vs. CPU:** you are the visitor. You bat in the top half while the computer
   pitches, and you pitch in the bottom half while the computer bats. Choose a
   **ROOKIE** or **PRO** computer batter.
-* **2P · 1 PHONE (manual):** pass-and-play. P1 is the visitor and P2 is home; whoever is in
+* **2P · 1 DEVICE (manual):** pass-and-play. P1 is the visitor and P2 is home; whoever is in
   the field uses the pitch buttons and whoever is up uses SWING and STEAL.
-* **2P · 2 PHONES (nearby):** each player on their own iPhone in the same room, connected
+* **2P · 2 DEVICES (nearby):** each player on their own iPhone in the same room, connected
   directly over Wi-Fi or Bluetooth with Apple's Multipeer Connectivity. No internet,
   account or server is needed. See below.
 
 Sound follows the ring/silent switch and can be muted from the top bar. Haptics can
 be turned off on the power-off screen.
 
-## Playing on two iPhones
+## Playing on two devices
 
-1. Install the app on both iPhones (build to each one from Xcode).
-2. On both phones choose **2P · 2 PHONES**. Turn on Wi-Fi or Bluetooth on both.
+1. Install the app on both devices, iPhone or iPad (build to each one from Xcode).
+2. On both phones choose **2P · 2 DEVICES**. Turn on Wi-Fi or Bluetooth on both.
 3. Phone 1 taps **HOST GAME**. Phone 2 taps **JOIN GAME**, then taps phone 1's name.
 4. The first time, iOS asks to allow **Local Network** access. Tap **Allow** on both phones.
 5. The game starts on both phones. The host is the visitor and bats first, and the host's
@@ -90,7 +102,7 @@ which cause a rain delay (see below).
   also treated as a rain delay and they keep trying to reconnect. While they can't reach
   each other, either player can tap **Call Off Game (No Result)**.
 * **Records per player pair.** Each phone gets a permanent player ID and a name you can set
-  on the 2P · 2 PHONES screen. When phones connect they swap IDs, and each phone keeps
+  on the 2P · 2 DEVICES screen. When phones connect they swap IDs, and each phone keeps
   your wins and losses against every opponent under **HEAD-TO-HEAD RECORDS**, with
   forfeits also counted separately (FF). Renaming yourself keeps your record. The top bar
   shows the current matchup, for example `VS SAM · 3-2`.

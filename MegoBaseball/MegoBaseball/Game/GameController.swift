@@ -96,7 +96,7 @@ final class GameController: ObservableObject {
 
     var modeLabel: String {
         if isNearbyGame, let opponent { return recordLine(against: opponent) }
-        if isNearbyGame { return "NEARBY · 2 PHONES" }
+        if isNearbyGame { return "NEARBY · 2 DEVICES" }
         return isTwoPlayer ? "MANUAL · 2 PLAYER" : "AUTO · VS CPU"
     }
 

@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Pitcher buttons on top, batter buttons below.
 struct ControlPanel: View {
+    @Environment(\.uiScale) private var scale
     @EnvironmentObject private var game: GameController
 
     var body: some View {
@@ -20,7 +21,7 @@ struct ControlPanel: View {
                     RetroButton(title: "STEAL", enabled: game.canSteal) {
                         game.steal()
                     }
-                    .frame(maxWidth: 110)
+                    .frame(maxWidth: 110 * scale)
                     RetroButton(title: "SWING", height: 72, enabled: game.canSwing) {
                         game.swing()
                     }
@@ -33,7 +34,7 @@ struct ControlPanel: View {
                                         @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .font(.system(size: 11 * scale, weight: .bold, design: .rounded))
                 .foregroundColor(.white.opacity(active ? 0.9 : 0.35))
             content()
         }
@@ -43,6 +44,7 @@ struct ControlPanel: View {
 /// An orange handheld-style button that fires the moment it is touched,
 /// not on release, so swing timing is accurate.
 struct RetroButton: View {
+    @Environment(\.uiScale) private var scale
     let title: String
     var height: CGFloat = 54
     let enabled: Bool
@@ -59,9 +61,9 @@ struct RetroButton: View {
 
     var body: some View {
         Text(title)
-            .font(.system(size: 17, weight: .heavy, design: .rounded))
+            .font(.system(size: 17 * scale, weight: .heavy, design: .rounded))
             .foregroundColor(Color.black.opacity(0.75))
-            .frame(maxWidth: .infinity, minHeight: height)
+            .frame(maxWidth: .infinity, minHeight: height * scale)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(LinearGradient(colors: [Theme.buttonOrange, Theme.buttonOrangeDark],

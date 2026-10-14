@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Shown in place of the buttons while a 2-phone game is in a rain delay.
 struct RainDelayView: View {
+    @Environment(\.uiScale) private var scale
     @EnvironmentObject private var game: GameController
     let delay: RainDelay
 
@@ -15,7 +16,7 @@ struct RainDelayView: View {
                 Image(systemName: "cloud.rain.fill")
                 Text("RAIN DELAY")
             }
-            .font(Theme.ledFont(22))
+            .font(Theme.ledFont(22 * scale))
             .foregroundColor(Theme.ledOn)
             .shadow(color: Theme.ledOn.opacity(0.6), radius: 6)
 
@@ -23,25 +24,25 @@ struct RainDelayView: View {
                 // Re-render every second so the countdown ticks.
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text("GAME RESUMES · 0:\(String(format: "%02d", delay.secondsLeft(now: context.date)))")
-                        .font(Theme.ledFont(16))
+                        .font(Theme.ledFont(16 * scale))
                         .foregroundColor(.white)
                 }
                 RetroButton(title: delay.meReady ? "READY ✓" : "RESUME", height: 60, enabled: !delay.meReady) {
                     game.readyToResume()
                 }
                 Text(statusLine)
-                    .font(.system(size: 13, design: .rounded))
+                    .font(.system(size: 13 * scale, design: .rounded))
                     .foregroundColor(.white.opacity(0.75))
                     .multilineTextAlignment(.center)
             } else {
                 Text(waitingLine)
-                    .font(.system(size: 14, design: .rounded))
+                    .font(.system(size: 14 * scale, design: .rounded))
                     .foregroundColor(.white.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                 if !delay.connected {
                     Button("Call Off Game (No Result)") { game.callOffGame() }
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(.system(size: 14 * scale, weight: .bold, design: .rounded))
                         .foregroundColor(Theme.buttonOrange)
                 }
             }
